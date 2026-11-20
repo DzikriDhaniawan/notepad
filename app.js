@@ -77,6 +77,43 @@
     return { slPips, tpPips, rr };
   }
 
+  /**
+   * Estimate signed P/L in the account currency from pair, direction, lot, entry and target price.
+   */
+  function estimateMoneyPnl({ pair, direction, lot, entry, targetPrice }) {
+    const clean = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const lotNum = Number(lot);
+    const e = Number(entry);
+    const t = Number(targetPrice);
+    if (!clean || !Number.isFinite(lotNum) || lotNum <= 0 || !Number.isFinite(e) || !Number.isFinite(t) || e <= 0 || t <= 0) {
+      return null;
+    }
+
+    const diff = direction === 'SELL' ? (e - t) : (t - e);
+    let usdPnl = 0;
+
+    if (clean.includes('XAU') || clean.includes('GOLD')) {
+      usdPnl = diff * lotNum * 100;
+    } else if (clean.includes('XAG') || clean.includes('SILVER')) {
+      usdPnl = diff * lotNum * 5000;
+    } else if (/(US30|NAS|SPX|NDX|DJI|GER|UK100|BTC|ETH)/.test(clean)) {
+      usdPnl = diff * lotNum;
+    } else if (clean.endsWith('USD') && clean.length === 6) {
+      usdPnl = diff * lotNum * 100000;
+    } else if (clean.startsWith('USD') && clean.length === 6) {
+      usdPnl = (diff / t) * lotNum * 100000;
+    } else if (clean.endsWith('JPY')) {
+      usdPnl = (diff / 150) * lotNum * 100000;
+    } else {
+      usdPnl = diff * lotNum * 100000;
+    }
+
+    const curr = state.account.currency;
+    const rate = curr === 'IDR' ? 16000 : curr === 'EUR' ? 0.92 : 1; // USC cent-lot already yields cents directly
+    const decimals = (CURRENCY_CONFIG[curr] || CURRENCY_CONFIG.USD).decimals;
+    return Number((usdPnl * rate).toFixed(decimals));
+  }
+
   function formatDateShort(isoStr) {
     if (!isoStr) return '-';
     const d = new Date(isoStr);
@@ -277,7 +314,13 @@
   }
 
   function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return true;
+    } catch {
+      showToast('Penyimpanan browser penuh! Hapus beberapa screenshot lama atau backup JSON.', 'coral');
+      return false;
+    }
   }
 
   // ---------- Analytics Engine ----------
@@ -955,16 +998,578 @@
     });
   }
 
-  function updateCalcPreview() {
+  let pnlManuallyEdited = false;
+  let pendingScreenshotData = '';
+  let tesseractPromise = null;
+
+  function setScreenshotPreviewUI(dataUrl, statusText = 'Siap dipindai', badgeText = 'Siap', badgeClass = 'badge-gold') {
+    const emptyEl = document.getElementById('ocrEmptyState');
+    const previewEl = document.getElementById('ocrPreviewState');
+    const imgEl = document.getElementById('ocrPreviewImg');
+    const badgeEl = document.getElementById('ocrStatusBadge');
+    const textEl = document.getElementById('ocrResultText');
+
+    if (!dataUrl) {
+      emptyEl.hidden = false;
+      previewEl.hidden = true;
+      imgEl.src = '';
+      return;
+    }
+
+    emptyEl.hidden = true;
+    previewEl.hidden = false;
+    imgEl.src = dataUrl;
+    badgeEl.textContent = badgeText;
+    badgeEl.className = `badge ${badgeClass}`;
+    textEl.textContent = statusText;
+  }
+
+  function ensureTesseractLoaded() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (tesseractPromise) return tesseractPromise;
+
+    tesseractPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      script.async = true;
+      script.onload = () => (window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Tesseract unavailable')));
+      script.onerror = () => {
+        tesseractPromise = null;
+        reject(new Error('Gagal memuat mesin OCR'));
+      };
+      document.head.appendChild(script);
+    });
+    return tesseractPromise;
+  }
+
+  function prepareOcrCanvasFromSrc(src, includeCompressed = false) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Format gambar tidak didukung'));
+      img.onload = () => {
+        let storedDataUrl = src;
+        if (includeCompressed) {
+          const maxStoreW = 960;
+          const storeScale = img.width > maxStoreW ? maxStoreW / img.width : 1;
+          const storeCanvas = document.createElement('canvas');
+          storeCanvas.width = Math.round(img.width * storeScale);
+          storeCanvas.height = Math.round(img.height * storeScale);
+          storeCanvas.getContext('2d').drawImage(img, 0, 0, storeCanvas.width, storeCanvas.height);
+          storedDataUrl = storeCanvas.toDataURL('image/jpeg', 0.74);
+        }
+
+        const ocrScale = img.width < 1200 ? 2 : 1;
+        const ocrCanvas = document.createElement('canvas');
+        ocrCanvas.width = Math.round(img.width * ocrScale);
+        ocrCanvas.height = Math.round(img.height * ocrScale);
+        const ctx = ocrCanvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, ocrCanvas.width, ocrCanvas.height);
+
+        const imgData = ctx.getImageData(0, 0, ocrCanvas.width, ocrCanvas.height);
+        const data = imgData.data;
+        let lumaSum = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          lumaSum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        }
+        const isDark = (lumaSum / (data.length / 4)) < 120;
+
+        for (let i = 0; i < data.length; i += 4) {
+          let lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          if (isDark) lum = 255 - lum;
+          lum = Math.max(0, Math.min(255, (lum - 128) * 1.35 + 128));
+          data[i] = data[i + 1] = data[i + 2] = lum;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        resolve({ storedDataUrl, ocrDataUrl: ocrCanvas.toDataURL('image/png') });
+      };
+      img.src = src;
+    });
+  }
+
+  function processImageForStorageAndOcr(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Gagal membaca gambar'));
+      reader.onload = () => {
+        prepareOcrCanvasFromSrc(String(reader.result), true).then(resolve, reject);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  let bulkOcrRows = [];
+
+  function normalizeOcrNumbers(raw) {
+    // Strip thousand commas (e.g. 3,719.549 -> 3719.549) before converting lone decimal commas
+    return String(raw || '')
+      .replace(/[|]/g, ' ')
+      .replace(/(\d),(\d{3})(?=\.\d|\D|$)/g, '$1$2')
+      .replace(/(\d),(\d{1,2})(?!\d)/g, '$1.$2');
+  }
+
+  function parseOcrMonthDate(str) {
+    const m = String(str || '').match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+(\d{1,2})[.,]?\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?\b/i);
+    if (!m) return null;
+    const months = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+    const monthIdx = months[m[1].toUpperCase().slice(0, 3)];
+    const day = Number(m[2]);
+    let hour = Number(m[3]);
+    const min = Number(m[4]);
+    const ampm = m[5] ? m[5].toUpperCase() : '';
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+    const yr = new Date().getFullYear();
+    return toDatetimeLocalValue(new Date(yr, monthIdx, day, hour, min, 0));
+  }
+
+  function extractPairFromUpper(upper) {
+    const indexMatch = upper.match(/\b(US30|NAS100|SPX500|NDX100|BTCUSD|ETHUSD|GOLD|SILVER)\b/);
+    if (indexMatch) {
+      return indexMatch[1] === 'GOLD' ? 'XAU/USD' : indexMatch[1] === 'SILVER' ? 'XAG/USD' : indexMatch[1];
+    }
+    const fxMatch = upper.match(/\b(EUR|GBP|USD|JPY|AUD|NZD|CAD|CHF|XAU|XAG)\s*\/?\s*(EUR|GBP|USD|JPY|AUD|NZD|CAD|CHF|USD)\b/);
+    if (fxMatch && fxMatch[1] !== fxMatch[2]) {
+      return `${fxMatch[1]}/${fxMatch[2]}`;
+    }
+    return '';
+  }
+
+  function parseTableRowFromLine(rawLine) {
+    const cleanLine = normalizeOcrNumbers(rawLine).trim();
+    const upper = cleanLine.toUpperCase();
+    const pair = extractPairFromUpper(upper);
+    const dirMatch = upper.match(/\b(BUY|SELL)\b/);
+    if (!pair || !dirMatch) return null;
+
+    const direction = dirMatch[1];
+    const dirIdx = upper.indexOf(direction) + direction.length;
+    const afterDir = cleanLine.slice(dirIdx).trim();
+
+    // Anchor before Position ID (7-12 digits) or Month Name
+    const anchorMatch = afterDir.match(/\b(?:\d{7,12}|(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{1,2})\b/i);
+    const priceSection = anchorMatch ? afterDir.slice(0, anchorMatch.index).trim() : afterDir;
+    const tokens = priceSection.split(/\s+/).filter((t) => /^(?:-|\d+(?:\.\d+)?)$/.test(t));
+    if (tokens.length < 3) return null;
+
+    const toNumOrNull = (tok) => (tok && tok !== '-' && Number.isFinite(Number(tok)) ? Number(tok) : null);
+    const lot = toNumOrNull(tokens[0]);
+    const entry = toNumOrNull(tokens[1]);
+    const exitPrice = toNumOrNull(tokens[2]);
+    // Exness history order: Open price, Close price, T/P, S/L
+    const tp = toNumOrNull(tokens[3]);
+    const sl = toNumOrNull(tokens[4]);
+
+    if (!lot || !entry) return null;
+
+    const trailingPnlMatch = cleanLine.match(/([+-]\s*\$?\s*\d+(?:\.\d{1,2})?)\s*$/);
+    const pnl = trailingPnlMatch ? Number(trailingPnlMatch[1].replace(/[\s$]/g, '')) : null;
+    const status = typeof pnl === 'number' && Number.isFinite(pnl)
+      ? (pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BE')
+      : 'WIN';
+
+    const date = parseOcrMonthDate(cleanLine) || toDatetimeLocalValue(new Date());
+
+    let reasonText = '';
+    if (/TAKE\s*PROFIT/i.test(cleanLine)) reasonText = 'Hit Take Profit (Impor Screenshot)';
+    else if (/STOP\s*LOSS/i.test(cleanLine)) reasonText = 'Hit Stop Loss (Impor Screenshot)';
+    else reasonText = 'Impor riwayat trading dari screenshot';
+
+    return {
+      selected: true,
+      date,
+      pair,
+      direction,
+      lot,
+      entry,
+      exitPrice,
+      sl: sl ?? entry,
+      tp: tp ?? (exitPrice || entry),
+      pnl: typeof pnl === 'number' && Number.isFinite(pnl) ? pnl : 0,
+      status,
+      reason: reasonText
+    };
+  }
+
+  function parseTradeRowsFromOcr(rawText) {
+    const lines = String(rawText || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const rows = [];
+    for (const line of lines) {
+      const parsed = parseTableRowFromLine(line);
+      if (parsed) rows.push(parsed);
+    }
+    const hasUscHint = /\bUSC\b/i.test(String(rawText || ''));
+    return { rows, hasUscHint };
+  }
+
+  function parseTradeTextFromOcr(rawText) {
+    const text = normalizeOcrNumbers(rawText);
+    const upper = text.toUpperCase();
+    const detected = {};
+
+    const pair = extractPairFromUpper(upper);
+    if (pair) detected.pair = pair;
+
+    const dirLotMatch = upper.match(/\b(BUY|SELL)(?:\s+(?:LIMIT|STOP))?\s+(\d+(?:\.\d{1,2})?)\b/);
+    if (dirLotMatch) {
+      detected.direction = dirLotMatch[1];
+      detected.lot = Number(dirLotMatch[2]);
+    } else {
+      const dirOnly = upper.match(/\b(BUY|SELL)\b/);
+      if (dirOnly) detected.direction = dirOnly[1];
+    }
+
+    const arrowPrices = text.match(/(\d+(?:\.\d{2,5}))\s*(?:->|→|=>|—|-|>)\s*(\d+(?:\.\d{2,5}))/);
+    if (arrowPrices) {
+      detected.entry = Number(arrowPrices[1]);
+      detected.exitPrice = Number(arrowPrices[2]);
+    } else {
+      const openMatch = text.match(/(?:open|entry|price)\s*[:=]?\s*(\d+(?:\.\d{2,5}))/i);
+      if (openMatch) detected.entry = Number(openMatch[1]);
+      const closeMatch = text.match(/(?:close|exit)\s*[:=]?\s*(\d+(?:\.\d{2,5}))/i);
+      if (closeMatch) detected.exitPrice = Number(closeMatch[1]);
+    }
+
+    const slMatch = text.match(/(?:S\s*\/?\s*L|STOP\s*LOSS)\s*[:=]?\s*(\d+(?:\.\d{2,5}))/i);
+    if (slMatch && Number(slMatch[1]) > 0) detected.sl = Number(slMatch[1]);
+
+    const tpMatch = text.match(/(?:T\s*\/?\s*P|TAKE\s*PROFIT|TARGET)\s*[:=]?\s*(\d+(?:\.\d{2,5}))/i);
+    if (tpMatch && Number(tpMatch[1]) > 0) detected.tp = Number(tpMatch[1]);
+
+    const labeledPnl = text.match(/(?:PROFIT|P\s*\/\s*L|PNL|NET)\s*[:=]?\s*([+-]?\s*\$?\s*\d+(?:\.\d{1,2})?)/i);
+    const signedMoney = text.match(/([+-]\s*\$?\s*\d+\.\d{2})\b/);
+    const rawPnlStr = labeledPnl ? labeledPnl[1] : (signedMoney ? signedMoney[1] : null);
+    if (rawPnlStr) {
+      const cleanVal = Number(rawPnlStr.replace(/[\s$]/g, ''));
+      if (Number.isFinite(cleanVal)) {
+        detected.pnl = cleanVal;
+        detected.status = cleanVal > 0 ? 'WIN' : cleanVal < 0 ? 'LOSS' : 'BE';
+      }
+    }
+
+    return detected;
+  }
+
+  function applyParsedOcrToForm(parsed) {
+    const appliedLabels = [];
+
+    if (parsed.pair) {
+      document.getElementById('tradePair').value = parsed.pair;
+      appliedLabels.push(`Pair ${parsed.pair}`);
+    }
+    if (parsed.direction) {
+      document.getElementById(parsed.direction === 'SELL' ? 'dirSell' : 'dirBuy').checked = true;
+      appliedLabels.push(parsed.direction);
+    }
+    if (parsed.lot && parsed.lot > 0) {
+      document.getElementById('tradeLot').value = parsed.lot.toFixed(2);
+      appliedLabels.push(`${parsed.lot.toFixed(2)} Lot`);
+    }
+    if (parsed.entry) {
+      document.getElementById('tradeEntry').value = parsed.entry;
+      appliedLabels.push(`Entry ${parsed.entry}`);
+    }
+    if (parsed.sl) {
+      document.getElementById('tradeSL').value = parsed.sl;
+      appliedLabels.push(`SL ${parsed.sl}`);
+    }
+    if (parsed.tp) {
+      document.getElementById('tradeTP').value = parsed.tp;
+      appliedLabels.push(`TP ${parsed.tp}`);
+    }
+    if (parsed.exitPrice) {
+      document.getElementById('tradeExitPrice').value = parsed.exitPrice;
+      appliedLabels.push(`Close ${parsed.exitPrice}`);
+    }
+    if (parsed.date) {
+      document.getElementById('tradeDate').value = parsed.date;
+    }
+    if (parsed.reason) {
+      document.getElementById('tradeReason').value = parsed.reason;
+    }
+    if (parsed.status) {
+      document.getElementById('tradeStatus').value = parsed.status;
+    }
+    if (typeof parsed.pnl === 'number') {
+      pnlManuallyEdited = true;
+      document.getElementById('tradePnl').value = Math.abs(parsed.pnl).toFixed(2);
+      appliedLabels.push(`P/L ${parsed.pnl >= 0 ? '+' : ''}${parsed.pnl.toFixed(2)}`);
+    }
+
+    updatePnlHelperText();
+    return appliedLabels;
+  }
+
+  function renderBulkOcrTable() {
+    const tbody = document.getElementById('bulkOcrTableBody');
+    const wrap = document.getElementById('bulkOcrTableWrap');
+    const countBadge = document.getElementById('bulkOcrCountBadge');
+    const importBtn = document.getElementById('btnImportBulkRows');
+
+    countBadge.textContent = `${bulkOcrRows.length} baris terdeteksi`;
+    if (bulkOcrRows.length === 0) {
+      wrap.hidden = true;
+      tbody.innerHTML = '';
+      importBtn.disabled = true;
+      return;
+    }
+
+    wrap.hidden = false;
+    tbody.innerHTML = bulkOcrRows
+      .map((r, idx) => `
+        <tr data-bulk-idx="${idx}">
+          <td><input type="checkbox" class="bulk-check" ${r.selected ? 'checked' : ''} /></td>
+          <td><input type="text" class="bulk-pair" data-field="pair" value="${escapeHtml(r.pair)}" /></td>
+          <td>
+            <select data-field="direction">
+              <option value="BUY" ${r.direction === 'BUY' ? 'selected' : ''}>BUY</option>
+              <option value="SELL" ${r.direction === 'SELL' ? 'selected' : ''}>SELL</option>
+            </select>
+          </td>
+          <td><input type="number" step="0.01" class="bulk-num" data-field="lot" value="${r.lot}" /></td>
+          <td><input type="number" step="any" class="bulk-num" data-field="entry" value="${r.entry}" /></td>
+          <td><input type="number" step="any" class="bulk-num" data-field="exitPrice" value="${r.exitPrice ?? ''}" /></td>
+          <td><input type="number" step="any" class="bulk-num" data-field="sl" value="${r.sl ?? ''}" /></td>
+          <td><input type="number" step="any" class="bulk-num" data-field="tp" value="${r.tp ?? ''}" /></td>
+          <td>
+            <select data-field="status">
+              <option value="WIN" ${r.status === 'WIN' ? 'selected' : ''}>WIN</option>
+              <option value="LOSS" ${r.status === 'LOSS' ? 'selected' : ''}>LOSS</option>
+              <option value="BE" ${r.status === 'BE' ? 'selected' : ''}>BE</option>
+            </select>
+          </td>
+          <td><input type="number" step="0.01" class="bulk-num" data-field="pnl" value="${r.pnl}" /></td>
+          <td><input type="text" class="bulk-reason" data-field="reason" value="${escapeHtml(r.reason)}" /></td>
+        </tr>
+      `)
+      .join('');
+
+    const selectedCount = bulkOcrRows.filter((r) => r.selected).length;
+    importBtn.disabled = selectedCount === 0;
+    importBtn.textContent = `Impor ${selectedCount} Trade Terpilih`;
+  }
+
+  function openBulkOcrModalWithRows(rows, hasUscHint) {
+    bulkOcrRows = rows;
+    document.getElementById('bulkOcrProgressTrack').hidden = true;
+    document.getElementById('bulkUscHint').hidden = !(hasUscHint && state.account.currency !== 'USC');
+    document.getElementById('bulkOcrStatusText').textContent = rows.length > 0
+      ? `Berhasil membaca ${rows.length} baris trade! Silakan periksa/koreksi angka jika ada yang meleset lalu klik Impor.`
+      : 'Tidak ada baris tabel trade yang terbaca jelas. Coba crop lebih dekat ke area tabel.';
+    renderBulkOcrTable();
+    openModal('bulkOcrModal');
+  }
+
+  async function runOcrRecognize(ocrImageUrl, onProgress) {
+    const Tesseract = await ensureTesseractLoaded();
+    const result = await Tesseract.recognize(ocrImageUrl, 'eng', {
+      logger: (m) => {
+        if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+          onProgress(Math.max(15, Math.round(m.progress * 100)));
+        }
+      }
+    });
+    return result?.data?.text || '';
+  }
+
+  async function scanScreenshotWithOcr(ocrImageUrl) {
+    const progressTrack = document.getElementById('ocrProgressTrack');
+    const progressFill = document.getElementById('ocrProgressFill');
+    progressTrack.hidden = false;
+    progressFill.style.width = '12%';
+    setScreenshotPreviewUI(pendingScreenshotData, 'Memuat mesin pemindai OCR...', 'Memindai...', 'badge-gold');
+
+    try {
+      const rawText = await runOcrRecognize(ocrImageUrl, (pct) => {
+        progressFill.style.width = `${pct}%`;
+        document.getElementById('ocrResultText').textContent = `Membaca teks screenshot... ${pct}%`;
+      });
+
+      progressTrack.hidden = true;
+      const { rows, hasUscHint } = parseTradeRowsFromOcr(rawText);
+
+      // If screenshot is a multi-row table (e.g. Exness history), open Bulk Importer!
+      if (rows.length >= 2) {
+        closeModal('tradeModal');
+        openBulkOcrModalWithRows(rows, hasUscHint);
+        return;
+      }
+
+      const parsed = rows.length === 1 ? rows[0] : parseTradeTextFromOcr(rawText);
+      const labels = applyParsedOcrToForm(parsed);
+
+      if (labels.length > 0) {
+        setScreenshotPreviewUI(
+          pendingScreenshotData,
+          `Terdeteksi: ${labels.join(' • ')}. Mohon cek kembali sebelum simpan.`,
+          `${labels.length} Data Terisi`,
+          'badge-mint'
+        );
+        showToast(`Auto-rekap berhasil mengisi ${labels.length} field!`);
+      } else {
+        setScreenshotPreviewUI(
+          pendingScreenshotData,
+          'Gambar terlampir, tetapi angka tidak terbaca jelas. Silakan lengkapi form secara manual.',
+          'Lampiran Siap',
+          'badge-gold'
+        );
+      }
+    } catch {
+      progressTrack.hidden = true;
+      setScreenshotPreviewUI(
+        pendingScreenshotData,
+        'Gagal memuat OCR (butuh koneksi internet saat pertama kali memindai). Gambar tetap terlampir.',
+        'Lampiran Siap',
+        'badge-coral'
+      );
+    }
+  }
+
+  async function handleBulkScreenshotFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      showToast('Pilih file gambar (PNG, JPG, WebP).', 'coral');
+      return;
+    }
+    const track = document.getElementById('bulkOcrProgressTrack');
+    const fill = document.getElementById('bulkOcrProgressFill');
+    const statusText = document.getElementById('bulkOcrStatusText');
+    bulkOcrRows = [];
+    renderBulkOcrTable();
+    track.hidden = false;
+    fill.style.width = '12%';
+    statusText.textContent = 'Memuat mesin pemindai OCR untuk tabel...';
+
+    try {
+      const { ocrDataUrl } = await processImageForStorageAndOcr(file);
+      const rawText = await runOcrRecognize(ocrDataUrl, (pct) => {
+        fill.style.width = `${pct}%`;
+        statusText.textContent = `Memindai baris tabel... ${pct}%`;
+      });
+      const { rows, hasUscHint } = parseTradeRowsFromOcr(rawText);
+      if (rows.length === 0) {
+        const single = parseTradeTextFromOcr(rawText);
+        if (single.pair && single.entry) {
+          rows.push({
+            selected: true,
+            date: toDatetimeLocalValue(new Date()),
+            pair: single.pair,
+            direction: single.direction || 'BUY',
+            lot: single.lot || 0.10,
+            entry: single.entry,
+            exitPrice: single.exitPrice ?? null,
+            sl: single.sl ?? single.entry,
+            tp: single.tp ?? (single.exitPrice || single.entry),
+            pnl: single.pnl ?? 0,
+            status: single.status || 'WIN',
+            reason: 'Impor riwayat trading dari screenshot'
+          });
+        }
+      }
+      openBulkOcrModalWithRows(rows, hasUscHint);
+    } catch {
+      track.hidden = true;
+      statusText.textContent = 'Gagal memuat OCR (butuh koneksi internet saat pertama kali memindai).';
+      showToast('Gagal memindai screenshot tabel.', 'coral');
+    }
+  }
+
+  async function handleScreenshotFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      showToast('Pilih file gambar (PNG, JPG, WebP).', 'coral');
+      return;
+    }
+    try {
+      const { storedDataUrl, ocrDataUrl } = await processImageForStorageAndOcr(file);
+      pendingScreenshotData = storedDataUrl;
+      await scanScreenshotWithOcr(ocrDataUrl);
+    } catch {
+      showToast('Gagal memproses file gambar.', 'coral');
+    }
+  }
+
+  function getFormEstimatedResult() {
     const pair = document.getElementById('tradePair').value;
+    const direction = document.querySelector('input[name="direction"]:checked')?.value || 'BUY';
+    const lot = document.getElementById('tradeLot').value;
     const entry = document.getElementById('tradeEntry').value;
     const sl = document.getElementById('tradeSL').value;
     const tp = document.getElementById('tradeTP').value;
+    const exitPrice = document.getElementById('tradeExitPrice').value;
+    const status = document.getElementById('tradeStatus').value;
+
+    const estSlSigned = estimateMoneyPnl({ pair, direction, lot, entry, targetPrice: sl });
+    const estTpSigned = estimateMoneyPnl({ pair, direction, lot, entry, targetPrice: tp });
+    const estExitSigned = estimateMoneyPnl({ pair, direction, lot, entry, targetPrice: exitPrice });
+
+    let recommendedPnl = null;
+    if (status === 'BE') {
+      recommendedPnl = 0;
+    } else if (estExitSigned !== null) {
+      recommendedPnl = status === 'OPEN' ? estExitSigned : Math.abs(estExitSigned);
+    } else if (status === 'WIN' && estTpSigned !== null) {
+      recommendedPnl = Math.abs(estTpSigned);
+    } else if (status === 'LOSS' && estSlSigned !== null) {
+      recommendedPnl = Math.abs(estSlSigned);
+    }
+
+    return { pair, direction, entry, sl, tp, estSlSigned, estTpSigned, estExitSigned, recommendedPnl };
+  }
+
+  function updateCalcPreview() {
+    const { pair, direction, entry, sl, tp, estSlSigned, estTpSigned, recommendedPnl } = getFormEstimatedResult();
     const { slPips, tpPips, rr } = calcPipMetrics(pair, entry, sl, tp);
 
     document.getElementById('previewSlPips').textContent = `${slPips.toFixed(1)} pips`;
     document.getElementById('previewTpPips').textContent = `${tpPips.toFixed(1)} pips`;
     document.getElementById('previewRR').textContent = `1 : ${rr.toFixed(2)}`;
+
+    const estLossEl = document.getElementById('previewEstLoss');
+    if (estSlSigned === null) {
+      estLossEl.textContent = `Est. Loss: ${formatCurrency(0)}`;
+      estLossEl.className = 'calc-sub mono text-coral-dark';
+    } else if (estSlSigned > 0) {
+      estLossEl.textContent = `SL Profit: ${formatCurrency(estSlSigned, true)}`;
+      estLossEl.className = 'calc-sub mono text-mint-dark';
+    } else {
+      estLossEl.textContent = `Est. Loss: ${formatCurrency(estSlSigned)}`;
+      estLossEl.className = 'calc-sub mono text-coral-dark';
+    }
+
+    const estProfitEl = document.getElementById('previewEstProfit');
+    if (estTpSigned === null) {
+      estProfitEl.textContent = `Est. Profit: ${formatCurrency(0)}`;
+      estProfitEl.className = 'calc-sub mono text-mint-dark';
+    } else {
+      estProfitEl.textContent = `Est. Profit: ${formatCurrency(estTpSigned, true)}`;
+      estProfitEl.className = `calc-sub mono ${estTpSigned >= 0 ? 'text-mint-dark' : 'text-coral-dark'}`;
+    }
+
+    const warnEl = document.getElementById('previewDirectionWarn');
+    const e = Number(entry);
+    const s = Number(sl);
+    const t = Number(tp);
+    let warnMsg = '';
+    if (Number.isFinite(e) && e > 0) {
+      if (direction === 'BUY') {
+        if (Number.isFinite(s) && s > 0 && s >= e) warnMsg = 'BUY: SL umumnya < Entry';
+        else if (Number.isFinite(t) && t > 0 && t <= e) warnMsg = 'BUY: TP umumnya > Entry';
+      } else {
+        if (Number.isFinite(s) && s > 0 && s <= e) warnMsg = 'SELL: SL umumnya > Entry';
+        else if (Number.isFinite(t) && t > 0 && t >= e) warnMsg = 'SELL: TP umumnya < Entry';
+      }
+    }
+    warnEl.textContent = warnMsg;
+    warnEl.hidden = !warnMsg;
+
+    const status = document.getElementById('tradeStatus').value;
+    const pnlInput = document.getElementById('tradePnl');
+    const syncBtn = document.getElementById('btnApplyEstimatedPnl');
+
+    if (status !== 'BE' && !pnlManuallyEdited && recommendedPnl !== null) {
+      const decimals = (CURRENCY_CONFIG[state.account.currency] || CURRENCY_CONFIG.USD).decimals;
+      pnlInput.value = recommendedPnl.toFixed(decimals);
+    }
+
+    syncBtn.hidden = status === 'BE' || recommendedPnl === null || !pnlManuallyEdited;
   }
 
   function updatePnlHelperText() {
@@ -972,30 +1577,37 @@
     const pnlInput = document.getElementById('tradePnl');
     const help = document.getElementById('pnlHelpText');
     const label = document.getElementById('tradePnlLabel');
+    const currSym = (CURRENCY_CONFIG[state.account.currency] || CURRENCY_CONFIG.USD).symbol.trim();
 
     if (status === 'WIN') {
-      label.textContent = 'Nominal Profit';
-      help.textContent = 'Masukkan jumlah profit (otomatis dihitung positif +).';
+      label.textContent = `Nominal Profit (${currSym})`;
+      help.textContent = 'Otomatis diisi dari Entry → TP & Lot (atau Harga Close jika diisi).';
       pnlInput.disabled = false;
     } else if (status === 'LOSS') {
-      label.textContent = 'Nominal Loss';
-      help.textContent = 'Masukkan jumlah rugi (otomatis dihitung minus -).';
+      label.textContent = `Nominal Loss (${currSym})`;
+      help.textContent = 'Otomatis diisi dari Entry → SL & Lot (otomatis dihitung minus -).';
       pnlInput.disabled = false;
     } else if (status === 'BE') {
-      label.textContent = 'Nominal Profit / Loss (0)';
+      label.textContent = `Nominal Profit / Loss (${currSym})`;
       help.textContent = 'Breakeven otomatis tercatat 0.';
       pnlInput.value = '0';
       pnlInput.disabled = true;
     } else {
-      label.textContent = 'Floating Profit / Loss Saat Ini';
-      help.textContent = 'Boleh negatif (-25) atau positif (+30), langsung mempengaruhi Equity.';
+      label.textContent = `Floating Profit / Loss (${currSym})`;
+      help.textContent = 'Otomatis jika Harga Close/Running diisi, atau ketik manual (-/+).';
       pnlInput.disabled = false;
     }
+    updateCalcPreview();
   }
 
   function openNewTradeModal() {
+    pnlManuallyEdited = false;
+    pendingScreenshotData = '';
     document.getElementById('tradeForm').reset();
     document.getElementById('tradeId').value = '';
+    document.getElementById('inputScreenshotFile').value = '';
+    document.getElementById('ocrProgressTrack').hidden = true;
+    setScreenshotPreviewUI('');
     document.getElementById('tradeModalTitle').textContent = 'Catat Trade Baru';
     document.getElementById('btnSaveTrade').textContent = 'Simpan Catatan Trade';
     document.getElementById('tradeDate').value = toDatetimeLocalValue(new Date());
@@ -1003,7 +1615,6 @@
     document.getElementById('tradeLot').value = '0.10';
     document.getElementById('tradeStatus').value = 'WIN';
     updatePnlHelperText();
-    updateCalcPreview();
     openModal('tradeModal');
   }
 
@@ -1011,6 +1622,16 @@
     const tr = state.trades.find((t) => t.id === tradeId);
     if (!tr) return;
 
+    pnlManuallyEdited = true;
+    pendingScreenshotData = tr.screenshotData || '';
+    document.getElementById('inputScreenshotFile').value = '';
+    document.getElementById('ocrProgressTrack').hidden = true;
+    setScreenshotPreviewUI(
+      pendingScreenshotData,
+      pendingScreenshotData ? 'Screenshot tersimpan. Klik "Pindai Ulang" jika ingin ekstrak teks.' : '',
+      'Terlampir',
+      'badge-mint'
+    );
     document.getElementById('tradeId').value = tr.id;
     document.getElementById('tradeModalTitle').textContent = `Edit Trade — ${tr.pair.toUpperCase()}`;
     document.getElementById('btnSaveTrade').textContent = 'Perbarui Catatan';
@@ -1033,7 +1654,6 @@
     document.getElementById('tradeChartUrl').value = tr.chartUrl || '';
 
     updatePnlHelperText();
-    updateCalcPreview();
     openModal('tradeModal');
   }
 
@@ -1049,6 +1669,11 @@
 
     const chartLinkHtml = isSafeHttpUrl(tr.chartUrl)
       ? `<a href="${escapeHtml(tr.chartUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-secondary">Buka Screenshot Chart</a>`
+      : '';
+
+    const hasSafeScreenshot = typeof tr.screenshotData === 'string' && tr.screenshotData.startsWith('data:image/');
+    const screenshotHtml = hasSafeScreenshot
+      ? `<div class="detail-screenshot"><img src="${escapeHtml(tr.screenshotData)}" alt="Screenshot trade ${escapeHtml(tr.pair)}" title="Klik untuk buka gambar" /></div>`
       : '';
 
     const distManualText =
@@ -1078,6 +1703,7 @@
         <p>${escapeHtml(tr.reason)}</p>
       </div>
 
+      ${screenshotHtml}
       ${tr.notes ? `<div class="detail-box"><span>Evaluasi / Catatan</span><strong style="font-weight:500">${escapeHtml(tr.notes)}</strong></div>` : ''}
       ${chartLinkHtml ? `<div>${chartLinkHtml}</div>` : ''}
     `;
@@ -1310,6 +1936,92 @@
       btnData.setAttribute('aria-expanded', 'false');
     });
 
+    document.getElementById('btnBulkScreenshotImport').addEventListener('click', () => {
+      openBulkOcrModalWithRows([], false);
+    });
+    document.getElementById('btnMobileBulkScreenshot').addEventListener('click', () => {
+      openBulkOcrModalWithRows([], false);
+    });
+
+    const bulkFileInput = document.getElementById('inputBulkScreenshotFile');
+    document.getElementById('btnPickBulkScreenshot').addEventListener('click', () => bulkFileInput.click());
+    bulkFileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) handleBulkScreenshotFile(file);
+      e.target.value = '';
+    });
+
+    document.getElementById('bulkCheckAll').addEventListener('change', (e) => {
+      const checked = e.target.checked;
+      bulkOcrRows.forEach((r) => { r.selected = checked; });
+      renderBulkOcrTable();
+    });
+
+    document.getElementById('bulkOcrTableBody').addEventListener('input', (e) => {
+      const tr = e.target.closest('tr[data-bulk-idx]');
+      if (!tr) return;
+      const idx = Number(tr.getAttribute('data-bulk-idx'));
+      const row = bulkOcrRows[idx];
+      if (!row) return;
+
+      const field = e.target.getAttribute('data-field');
+      if (e.target.classList.contains('bulk-check')) {
+        row.selected = e.target.checked;
+        const selectedCount = bulkOcrRows.filter((r) => r.selected).length;
+        const importBtn = document.getElementById('btnImportBulkRows');
+        importBtn.disabled = selectedCount === 0;
+        importBtn.textContent = `Impor ${selectedCount} Trade Terpilih`;
+      } else if (field) {
+        if (['lot', 'entry', 'exitPrice', 'sl', 'tp', 'pnl'].includes(field)) {
+          row[field] = e.target.value === '' ? null : Number(e.target.value);
+        } else {
+          row[field] = e.target.value;
+        }
+      }
+    });
+
+    document.getElementById('btnSwitchCurrencyUsc').addEventListener('click', () => {
+      state.account.currency = 'USC';
+      saveState();
+      renderAll();
+      document.getElementById('bulkUscHint').hidden = true;
+      showToast('Mata uang akun diubah ke USC (Cent).');
+    });
+
+    document.getElementById('btnImportBulkRows').addEventListener('click', () => {
+      const chosen = bulkOcrRows.filter((r) => r.selected && r.pair && Number.isFinite(Number(r.entry)));
+      if (chosen.length === 0) return;
+
+      chosen.forEach((r) => {
+        state.trades.push({
+          id: uid(),
+          date: r.date || toDatetimeLocalValue(new Date()),
+          pair: String(r.pair).trim().toUpperCase(),
+          direction: r.direction === 'SELL' ? 'SELL' : 'BUY',
+          lot: Number(r.lot) || 0.01,
+          entry: Number(r.entry),
+          sl: Number(r.sl) || Number(r.entry),
+          tp: Number(r.tp) || Number(r.exitPrice) || Number(r.entry),
+          exitPrice: r.exitPrice != null ? Number(r.exitPrice) : null,
+          entryDistanceManual: null,
+          timeframe: 'M15',
+          session: 'London',
+          status: r.status || 'WIN',
+          pnl: normalizePnlByStatus(r.status || 'WIN', Number(r.pnl) || 0),
+          setupTag: 'Impor Screenshot',
+          reason: String(r.reason || 'Impor riwayat trading dari screenshot').trim(),
+          notes: '',
+          chartUrl: ''
+        });
+      });
+
+      state.isDemo = false;
+      saveState();
+      closeModal('bulkOcrModal');
+      renderAll();
+      showToast(`Berhasil mengimpor ${chosen.length} trade dari screenshot!`);
+    });
+
     document.getElementById('btnExportCSV').addEventListener('click', exportCSV);
     document.getElementById('btnMobileExportCSV').addEventListener('click', exportCSV);
     document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
@@ -1319,11 +2031,85 @@
     document.getElementById('btnResetAll').addEventListener('click', handleResetAll);
     document.getElementById('btnMobileResetAll').addEventListener('click', handleResetAll);
 
-    // Trade Form live preview & submit
-    ['tradePair', 'tradeEntry', 'tradeSL', 'tradeTP'].forEach((id) => {
+    // Trade Form live preview & auto P/L estimation
+    ['tradePair', 'tradeLot', 'tradeEntry', 'tradeSL', 'tradeTP', 'tradeExitPrice'].forEach((id) => {
       document.getElementById(id).addEventListener('input', updateCalcPreview);
     });
-    document.getElementById('tradeStatus').addEventListener('change', updatePnlHelperText);
+    document.querySelectorAll('input[name="direction"]').forEach((radio) => {
+      radio.addEventListener('change', updateCalcPreview);
+    });
+    document.getElementById('tradeStatus').addEventListener('change', () => {
+      updatePnlHelperText();
+    });
+    document.getElementById('tradePnl').addEventListener('input', () => {
+      pnlManuallyEdited = true;
+      updateCalcPreview();
+    });
+    document.getElementById('btnApplyEstimatedPnl').addEventListener('click', () => {
+      pnlManuallyEdited = false;
+      updateCalcPreview();
+    });
+
+    // Screenshot Upload, Drag-Drop, Paste & OCR Auto-Rekap
+    const fileInput = document.getElementById('inputScreenshotFile');
+    const dropzone = document.getElementById('ocrDropzone');
+
+    document.getElementById('btnPickScreenshot').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) handleScreenshotFile(file);
+      e.target.value = '';
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('is-dragover');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('is-dragover');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('is-dragover');
+      const file = e.dataTransfer?.files?.[0];
+      if (file) handleScreenshotFile(file);
+    });
+
+    document.addEventListener('paste', (e) => {
+      const inTradeModal = !document.getElementById('tradeModal').hidden;
+      const inBulkModal = !document.getElementById('bulkOcrModal').hidden;
+      if (!inTradeModal && !inBulkModal) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            if (inBulkModal) handleBulkScreenshotFile(file);
+            else handleScreenshotFile(file);
+            break;
+          }
+        }
+      }
+    });
+
+    document.getElementById('btnRemoveScreenshot').addEventListener('click', () => {
+      pendingScreenshotData = '';
+      document.getElementById('inputScreenshotFile').value = '';
+      document.getElementById('ocrProgressTrack').hidden = true;
+      setScreenshotPreviewUI('');
+    });
+
+    document.getElementById('btnRunOcrAgain').addEventListener('click', async () => {
+      if (!pendingScreenshotData) return;
+      try {
+        const { ocrDataUrl } = await prepareOcrCanvasFromSrc(pendingScreenshotData, false);
+        await scanScreenshotWithOcr(ocrDataUrl);
+      } catch {
+        showToast('Gagal memindai ulang gambar.', 'coral');
+      }
+    });
 
     document.getElementById('tradeForm').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -1352,20 +2138,27 @@
         setupTag: document.getElementById('tradeSetupTag').value.trim(),
         reason: document.getElementById('tradeReason').value.trim(),
         notes: document.getElementById('tradeNotes').value.trim(),
-        chartUrl: document.getElementById('tradeChartUrl').value.trim()
+        chartUrl: document.getElementById('tradeChartUrl').value.trim(),
+        screenshotData: pendingScreenshotData || ''
       };
 
+      const prevTrades = [...state.trades];
       if (id) {
         const idx = state.trades.findIndex((t) => t.id === id);
         if (idx >= 0) state.trades[idx] = record;
-        showToast(`Trade ${record.pair} diperbarui.`);
       } else {
         state.trades.push(record);
-        showToast(`Trade ${record.pair} berhasil dicatat.`);
       }
 
+      const prevDemo = state.isDemo;
       state.isDemo = false;
-      saveState();
+      if (!saveState()) {
+        state.trades = prevTrades;
+        state.isDemo = prevDemo;
+        return;
+      }
+
+      showToast(id ? `Trade ${record.pair} diperbarui.` : `Trade ${record.pair} berhasil dicatat.`);
       closeModal('tradeModal');
       renderAll();
     });

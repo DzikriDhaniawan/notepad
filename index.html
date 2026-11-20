@@ -51,6 +51,8 @@
             <span class="label-mobile">Data</span>
           </button>
           <div class="dropdown-menu" id="dataDropdownMenu" hidden>
+            <button type="button" class="dropdown-item" id="btnBulkScreenshotImport">Impor Screenshot Tabel (OCR)</button>
+            <div class="dropdown-divider"></div>
             <button type="button" class="dropdown-item" id="btnExportCSV">Unduh CSV (Excel)</button>
             <button type="button" class="dropdown-item" id="btnExportJSON">Backup JSON</button>
             <label class="dropdown-item file-label">
@@ -320,6 +322,20 @@
             </div>
           </div>
           <div class="mobile-menu-actions">
+            <button type="button" class="mobile-menu-btn" id="btnMobileBulkScreenshot">
+              <span class="mm-icon mm-gold">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+              </span>
+              <span class="mm-text">
+                <strong>Impor Screenshot Tabel (OCR)</strong>
+                <small>Pindai banyak riwayat trade sekaligus dari 1 gambar</small>
+              </span>
+            </button>
+
             <button type="button" class="mobile-menu-btn" id="btnMobileExportCSV">
               <span class="mm-icon mm-mint">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -406,6 +422,42 @@
       <form id="tradeForm" class="modal-body">
         <input type="hidden" id="tradeId" />
 
+        <!-- Auto-Rekap Screenshot (OCR + Lampiran Gambar) -->
+        <div class="ocr-dropzone" id="ocrDropzone">
+          <input type="file" id="inputScreenshotFile" accept="image/*" hidden />
+          <div class="ocr-empty" id="ocrEmptyState">
+            <div class="ocr-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div class="ocr-copy">
+              <strong>Auto-Rekap dari Screenshot (MT4 / MT5 / TradingView)</strong>
+              <span>Upload, tarik gambar ke sini, atau tekan <kbd>Ctrl+V</kbd> untuk pindai otomatis.</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" id="btnPickScreenshot">Pilih Gambar</button>
+          </div>
+
+          <div class="ocr-preview" id="ocrPreviewState" hidden>
+            <img id="ocrPreviewImg" src="" alt="Preview screenshot trade" />
+            <div class="ocr-preview-info">
+              <div class="ocr-status-row">
+                <span class="badge badge-gold" id="ocrStatusBadge">Siap dipindai</span>
+                <div class="ocr-preview-actions">
+                  <button type="button" class="btn-table-action" id="btnRunOcrAgain">Pindai Ulang</button>
+                  <button type="button" class="btn-table-action delete" id="btnRemoveScreenshot">Hapus</button>
+                </div>
+              </div>
+              <div class="ocr-progress-track" id="ocrProgressTrack" hidden>
+                <div class="ocr-progress-fill" id="ocrProgressFill" style="width: 0%"></div>
+              </div>
+              <p class="ocr-result-text" id="ocrResultText">Mengambil data Pair, Arah, Lot, Entry, SL, TP &amp; Profit/Loss...</p>
+            </div>
+          </div>
+        </div>
+
         <div class="form-section-title">1. Informasi Pair &amp; Posisi</div>
         <div class="form-grid form-grid-4">
           <div class="form-group">
@@ -476,14 +528,17 @@
           <div class="calc-item">
             <span class="calc-label">Jarak Entry → SL</span>
             <strong class="mono text-coral-dark" id="previewSlPips">0.0 pips</strong>
+            <span class="calc-sub mono text-coral-dark" id="previewEstLoss">Est. Loss: -$0.00</span>
           </div>
           <div class="calc-item">
             <span class="calc-label">Jarak Entry → TP</span>
             <strong class="mono text-mint-dark" id="previewTpPips">0.0 pips</strong>
+            <span class="calc-sub mono text-mint-dark" id="previewEstProfit">Est. Profit: +$0.00</span>
           </div>
           <div class="calc-item">
             <span class="calc-label">Risk : Reward Ratio</span>
             <strong class="mono" id="previewRR">1 : 0.00</strong>
+            <span class="calc-sub calc-warn" id="previewDirectionWarn" hidden></span>
           </div>
           <div class="calc-item">
             <span class="calc-label">Timeframe / Sesi</span>
@@ -519,9 +574,12 @@
           </div>
 
           <div class="form-group">
-            <label for="tradePnl" id="tradePnlLabel">Nominal Profit / Loss ($)</label>
-            <input type="number" id="tradePnl" step="0.01" placeholder="cth: 120.50" required />
-            <small class="field-help" id="pnlHelpText">Masukkan angka positif, sistem otomatis tandai +/- sesuai status.</small>
+            <div class="label-action-row">
+              <label for="tradePnl" id="tradePnlLabel">Nominal Profit / Loss ($)</label>
+              <button type="button" class="btn-inline-sync" id="btnApplyEstimatedPnl" hidden title="Sesuaikan otomatis dari Open, SL/TP &amp; Lot">↺ Estimasi</button>
+            </div>
+            <input type="number" id="tradePnl" step="0.01" placeholder="Otomatis dari SL/TP" required />
+            <small class="field-help" id="pnlHelpText">Otomatis dihitung dari harga Entry, SL/TP, dan Lot.</small>
           </div>
 
           <div class="form-group">
@@ -672,6 +730,68 @@
       <div class="confirm-actions">
         <button type="button" class="btn btn-ghost" id="btnConfirmCancel">Batal</button>
         <button type="button" class="btn btn-primary" id="btnConfirmAccept">Ya, Lanjutkan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Bulk Impor Screenshot Tabel (OCR) -->
+  <div class="modal-backdrop" id="bulkOcrModal" hidden role="dialog" aria-modal="true" aria-labelledby="bulkOcrTitle">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-header">
+        <div>
+          <h2 id="bulkOcrTitle">Impor Screenshot Riwayat Trading (OCR)</h2>
+          <p class="modal-subtitle">Cocok untuk tabel riwayat Exness, MT4/MT5 Web. Periksa/koreksi angka sebelum impor.</p>
+        </div>
+        <button type="button" class="btn-icon" data-close-modal="bulkOcrModal" aria-label="Tutup">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <input type="file" id="inputBulkScreenshotFile" accept="image/*" hidden />
+
+        <div class="bulk-ocr-top">
+          <button type="button" class="btn btn-secondary" id="btnPickBulkScreenshot">Pilih / Ganti Screenshot</button>
+          <span class="badge badge-gold" id="bulkOcrCountBadge">0 baris terdeteksi</span>
+          <div class="bulk-usc-hint" id="bulkUscHint" hidden>
+            <span>Terdeteksi akun <strong>USC (Cent)</strong> pada gambar.</span>
+            <button type="button" class="btn-inline-sync" id="btnSwitchCurrencyUsc">Gunakan Mata Uang USC</button>
+          </div>
+        </div>
+
+        <div class="ocr-progress-track" id="bulkOcrProgressTrack" hidden>
+          <div class="ocr-progress-fill" id="bulkOcrProgressFill" style="width: 0%"></div>
+        </div>
+        <p class="ocr-result-text" id="bulkOcrStatusText">Pilih screenshot riwayat trading (atau paste gambar dengan Ctrl+V).</p>
+
+        <div class="bulk-table-wrap" id="bulkOcrTableWrap" hidden>
+          <table class="bulk-ocr-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="bulkCheckAll" checked title="Pilih semua" /></th>
+                <th>Pair</th>
+                <th>Arah</th>
+                <th>Lot</th>
+                <th>Open</th>
+                <th>Close</th>
+                <th>SL</th>
+                <th>TP</th>
+                <th>Status</th>
+                <th>P/L</th>
+                <th>Reason / Catatan</th>
+              </tr>
+            </thead>
+            <tbody id="bulkOcrTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-modal="bulkOcrModal">Batal</button>
+        <button type="button" class="btn btn-primary" id="btnImportBulkRows" disabled>Impor Trade Terpilih</button>
       </div>
     </div>
   </div>
