@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PipNote — Forex Trading Journal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Navigation / Header -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M4 17L9.5 11.5L13.5 14.5L20 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M15.5 7H20V11.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">PipNote</h1>
+          <p class="brand-subtitle">Jurnal &amp; Analitik Trading Forex</p>
+        </div>
+      </div>
+
+      <div class="mobile-top-status" id="mobileTopStatus">
+        <span class="mobile-top-label">Winrate</span>
+        <strong class="mono" id="mobileTopWinrate">0.0%</strong>
+      </div>
+
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-ghost" id="btnAccountSettings" title="Atur Modal, Balance &amp; Mata Uang">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.86 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.65 0-1.25.4-1.51 1z" />
+          </svg>
+          <span>Akun</span>
+        </button>
+
+        <div class="dropdown">
+          <button type="button" class="btn btn-secondary" id="btnDataMenu" aria-haspopup="true" aria-expanded="false">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span class="label-desktop">Ekspor / Impor</span>
+            <span class="label-mobile">Data</span>
+          </button>
+          <div class="dropdown-menu" id="dataDropdownMenu" hidden>
+            <button type="button" class="dropdown-item" id="btnExportCSV">Unduh CSV (Excel)</button>
+            <button type="button" class="dropdown-item" id="btnExportJSON">Backup JSON</button>
+            <label class="dropdown-item file-label">
+              Impor Backup JSON
+              <input type="file" id="inputImportJSON" accept=".json,application/json" hidden />
+            </label>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item danger" id="btnResetAll">Hapus Semua Data</button>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-primary" id="btnNewTrade">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          <span>Catat Trade</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Demo Banner (shown only if sample data is active) -->
+    <div class="demo-banner" id="demoBanner" hidden>
+      <div class="demo-banner-text">
+        <span class="badge badge-gold">Data Contoh</span>
+        <span>Saat ini menampilkan data simulasi agar grafik &amp; statistik terlihat. Kamu bisa langsung edit atau mulai kosong.</span>
+      </div>
+      <button type="button" class="btn btn-sm btn-secondary" id="btnClearDemo">Mulai Jurnal Kosong</button>
+    </div>
+
+    <main class="main-content" id="mainContent" data-mobile-tab="overview">
+      <!-- Primary KPI Cards -->
+      <section class="kpi-grid" aria-label="Ringkasan Akun dan Performa">
+        <!-- Balance -->
+        <article class="kpi-card kpi-highlight-mint">
+          <div class="kpi-header">
+            <span class="kpi-label">Balance Saat Ini</span>
+            <button type="button" class="kpi-edit-btn" id="btnQuickEditAccount" title="Sesuaikan Modal / Balance">Atur</button>
+          </div>
+          <div class="kpi-value mono" id="kpiBalance">$0.00</div>
+          <div class="kpi-meta">
+            <span>Modal Awal: <strong class="mono" id="kpiInitialBalance">$0.00</strong></span>
+            <span class="kpi-pill" id="kpiGrowthBadge">0.0%</span>
+          </div>
+        </article>
+
+        <!-- Equity -->
+        <article class="kpi-card kpi-highlight-gold">
+          <div class="kpi-header">
+            <span class="kpi-label">Equity Saat Ini</span>
+            <span class="kpi-tag" id="kpiOpenCountTag">0 Open</span>
+          </div>
+          <div class="kpi-value mono" id="kpiEquity">$0.00</div>
+          <div class="kpi-meta">
+            <span>Floating P/L: <strong class="mono" id="kpiFloating">$0.00</strong></span>
+            <span class="muted" id="kpiEquityNote">Real-time</span>
+          </div>
+        </article>
+
+        <!-- Winrate -->
+        <article class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Akumulasi Winrate</span>
+            <span class="kpi-tag" id="kpiTotalTradesTag">0 Trade</span>
+          </div>
+          <div class="kpi-value mono" id="kpiWinrate">0.0%</div>
+          <div class="winrate-bar" aria-hidden="true">
+            <div class="winrate-fill-win" id="winrateBarWin" style="width: 0%"></div>
+            <div class="winrate-fill-loss" id="winrateBarLoss" style="width: 0%"></div>
+          </div>
+          <div class="kpi-meta">
+            <span class="text-mint"><strong id="kpiWinsCount">0</strong> Win</span>
+            <span class="text-coral"><strong id="kpiLossesCount">0</strong> Loss</span>
+            <span class="muted"><strong id="kpiBeCount">0</strong> BE</span>
+          </div>
+        </article>
+
+        <!-- Profit & Loss Summary -->
+        <article class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Akumulasi Profit / Loss</span>
+            <span class="kpi-tag" id="kpiProfitFactorTag">PF: 0.00</span>
+          </div>
+          <div class="kpi-value mono" id="kpiNetPnl">$0.00</div>
+          <div class="kpi-meta profit-loss-split">
+            <span>Profit: <strong class="mono text-mint-dark" id="kpiGrossProfit">+$0.00</strong></span>
+            <span>Loss: <strong class="mono text-coral-dark" id="kpiGrossLoss">-$0.00</strong></span>
+          </div>
+        </article>
+      </section>
+
+      <!-- Secondary Metrics Strip -->
+      <section class="mini-stats-strip" aria-label="Metrik Tambahan">
+        <div class="mini-stat">
+          <span class="mini-label">Rata-rata Win</span>
+          <strong class="mini-val mono text-mint-dark" id="statAvgWin">$0.00</strong>
+        </div>
+        <div class="mini-stat">
+          <span class="mini-label">Rata-rata Loss</span>
+          <strong class="mini-val mono text-coral-dark" id="statAvgLoss">$0.00</strong>
+        </div>
+        <div class="mini-stat">
+          <span class="mini-label">Rata-rata R:R</span>
+          <strong class="mini-val mono" id="statAvgRR">1 : 0.00</strong>
+        </div>
+        <div class="mini-stat">
+          <span class="mini-label">Profit Terbesar</span>
+          <strong class="mini-val mono text-mint-dark" id="statBestTrade">$0.00</strong>
+        </div>
+        <div class="mini-stat">
+          <span class="mini-label">Loss Terbesar</span>
+          <strong class="mini-val mono text-coral-dark" id="statWorstTrade">$0.00</strong>
+        </div>
+        <div class="mini-stat">
+          <span class="mini-label">Max Drawdown</span>
+          <strong class="mini-val mono" id="statMaxDD">0.0%</strong>
+        </div>
+      </section>
+
+      <!-- Charts Section -->
+      <section class="charts-grid" aria-label="Grafik Performa">
+        <div class="card chart-card chart-equity">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Kurva Pertumbuhan Balance &amp; Equity</h2>
+              <p class="card-subtitle">Progres akumulasi saldo dari setiap trade tertutup</p>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="dot dot-mint"></span>Balance</span>
+              <span class="legend-item"><span class="dot dot-gold"></span>Equity</span>
+            </div>
+          </div>
+          <div class="chart-container" id="equityChartContainer">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <div class="card chart-card chart-breakdown">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Distribusi Hasil &amp; Pair</h2>
+              <p class="card-subtitle">Rasio Win/Loss dan performa per pair teraktif</p>
+            </div>
+          </div>
+          <div class="breakdown-body">
+            <div class="donut-wrapper" id="winLossDonutContainer"></div>
+            <div class="pair-bars-wrapper" id="pairBreakdownContainer"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Journal Log Section -->
+      <section class="card journal-section" aria-label="Daftar Catatan Trading">
+        <div class="journal-toolbar">
+          <div class="journal-title-group">
+            <h2 class="card-title">Riwayat Jurnal Trading</h2>
+            <span class="count-badge" id="filteredCountBadge">0 catatan</span>
+          </div>
+
+          <div class="filters-row">
+            <div class="search-box">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input type="search" id="filterSearch" placeholder="Cari pair, reason entry, catatan..." />
+            </div>
+
+            <select id="filterPair" aria-label="Filter Pair">
+              <option value="ALL">Semua Pair</option>
+            </select>
+
+            <select id="filterDirection" aria-label="Filter Arah">
+              <option value="ALL">BUY &amp; SELL</option>
+              <option value="BUY">BUY saja</option>
+              <option value="SELL">SELL saja</option>
+            </select>
+
+            <select id="filterStatus" aria-label="Filter Hasil">
+              <option value="ALL">Semua Hasil</option>
+              <option value="WIN">Win</option>
+              <option value="LOSS">Loss</option>
+              <option value="BE">Breakeven</option>
+              <option value="OPEN">Open / Running</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Desktop Table -->
+        <div class="table-responsive">
+          <table class="journal-table" id="journalTable">
+            <thead>
+              <tr>
+                <th>Tanggal &amp; Pair</th>
+                <th>Arah / Lot</th>
+                <th>Entry &amp; Jarak Entry</th>
+                <th>Stop Loss (SL)</th>
+                <th>Take Profit (TP)</th>
+                <th>Reason Entry</th>
+                <th class="text-right">Profit / Loss</th>
+                <th class="text-right">Balance &amp; Equity</th>
+                <th class="text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="journalTableBody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Mobile Card List -->
+        <div class="mobile-trade-list" id="mobileTradeList">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState" hidden>
+          <div class="empty-icon">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+          </div>
+          <h3>Belum ada catatan trade yang cocok</h3>
+          <p>Mulai catat posisi BUY/SELL kamu lengkap dengan jarak entry, SL, TP, dan reason entry.</p>
+          <button type="button" class="btn btn-primary" id="btnEmptyAddTrade">+ Catat Trade Pertama</button>
+        </div>
+      </section>
+
+      <!-- Mobile Menu / Akun & Data Panel -->
+      <section class="mobile-account-panel" id="mobileAccountPanel" aria-label="Menu Akun dan Data">
+        <div class="card mobile-menu-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Akun Trading</h2>
+              <p class="card-subtitle">Atur modal awal, mata uang, deposit/withdraw &amp; floating</p>
+            </div>
+            <span class="badge badge-gold" id="mobileAccCurrencyBadge">USD</span>
+          </div>
+          <div class="mobile-acc-summary">
+            <div class="mobile-acc-row">
+              <span>Modal Awal</span>
+              <strong class="mono" id="mobileAccInitial">$0.00</strong>
+            </div>
+            <div class="mobile-acc-row">
+              <span>Balance Saat Ini</span>
+              <strong class="mono text-mint-dark" id="mobileAccBalance">$0.00</strong>
+            </div>
+            <div class="mobile-acc-row">
+              <span>Equity Saat Ini</span>
+              <strong class="mono" id="mobileAccEquity">$0.00</strong>
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-block" id="btnMobileAccountSettings">
+            Atur Modal, Saldo &amp; Mata Uang
+          </button>
+        </div>
+
+        <div class="card mobile-menu-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Backup &amp; Ekspor Data</h2>
+              <p class="card-subtitle">Simpan laporan ke Excel (CSV) atau cadangkan JSON</p>
+            </div>
+          </div>
+          <div class="mobile-menu-actions">
+            <button type="button" class="mobile-menu-btn" id="btnMobileExportCSV">
+              <span class="mm-icon mm-mint">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </span>
+              <span class="mm-text">
+                <strong>Unduh CSV (Excel)</strong>
+                <small>Ekspor seluruh riwayat trade ke spreadsheet</small>
+              </span>
+            </button>
+
+            <button type="button" class="mobile-menu-btn" id="btnMobileExportJSON">
+              <span class="mm-icon mm-gold">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                  <polyline points="17 21 17 13 7 13 7 21" />
+                  <polyline points="7 3 7 8 15 8" />
+                </svg>
+              </span>
+              <span class="mm-text">
+                <strong>Backup JSON</strong>
+                <small>Cadangkan akun &amp; semua trade ke file .json</small>
+              </span>
+            </button>
+
+            <label class="mobile-menu-btn">
+              <span class="mm-icon mm-cream">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </span>
+              <span class="mm-text">
+                <strong>Impor Backup JSON</strong>
+                <small>Pulihkan data dari file backup sebelumnya</small>
+              </span>
+              <input type="file" id="inputMobileImportJSON" accept=".json,application/json" hidden />
+            </label>
+
+            <button type="button" class="mobile-menu-btn danger" id="btnMobileResetAll">
+              <span class="mm-icon mm-coral">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </span>
+              <span class="mm-text">
+                <strong>Hapus Semua Data</strong>
+                <small>Kosongkan seluruh catatan trading di browser</small>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>PipNote Forex Journal &bull; Data tersimpan aman di browser lokal (LocalStorage) &bull; Mendukung ekspor CSV &amp; JSON</span>
+    </footer>
+  </div>
+
+  <!-- Modal: Tambah / Edit Trade -->
+  <div class="modal-backdrop" id="tradeModal" hidden role="dialog" aria-modal="true" aria-labelledby="tradeModalTitle">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div>
+          <h2 id="tradeModalTitle">Catat Trade Baru</h2>
+          <p class="modal-subtitle">Isi detail eksekusi, jarak entry, SL/TP, dan alasan entry.</p>
+        </div>
+        <button type="button" class="btn-icon" data-close-modal="tradeModal" aria-label="Tutup">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="tradeForm" class="modal-body">
+        <input type="hidden" id="tradeId" />
+
+        <div class="form-section-title">1. Informasi Pair &amp; Posisi</div>
+        <div class="form-grid form-grid-4">
+          <div class="form-group">
+            <label for="tradeDate">Tanggal &amp; Waktu</label>
+            <input type="datetime-local" id="tradeDate" required />
+          </div>
+
+          <div class="form-group">
+            <label for="tradePair">Pair</label>
+            <input type="text" id="tradePair" list="pairSuggestions" placeholder="cth: XAU/USD" required />
+            <datalist id="pairSuggestions">
+              <option value="EUR/USD"></option>
+              <option value="GBP/USD"></option>
+              <option value="XAU/USD"></option>
+              <option value="USD/JPY"></option>
+              <option value="GBP/JPY"></option>
+              <option value="AUD/USD"></option>
+              <option value="USD/CHF"></option>
+              <option value="USD/CAD"></option>
+              <option value="EUR/JPY"></option>
+              <option value="NZD/USD"></option>
+              <option value="US30"></option>
+              <option value="NAS100"></option>
+            </datalist>
+          </div>
+
+          <div class="form-group">
+            <label>Arah Posisi</label>
+            <div class="segmented-control">
+              <input type="radio" name="direction" id="dirBuy" value="BUY" checked />
+              <label for="dirBuy" class="seg-buy">BUY</label>
+              <input type="radio" name="direction" id="dirSell" value="SELL" />
+              <label for="dirSell" class="seg-sell">SELL</label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="tradeLot">Lot Size</label>
+            <input type="number" id="tradeLot" step="0.01" min="0.01" value="0.10" required />
+          </div>
+        </div>
+
+        <div class="form-section-title">2. Harga Entry, Jarak Entry, Stop Loss &amp; Take Profit</div>
+        <div class="form-grid form-grid-4">
+          <div class="form-group">
+            <label for="tradeEntry">Harga Entry</label>
+            <input type="number" id="tradeEntry" step="any" placeholder="cth: 1.08500" required />
+          </div>
+
+          <div class="form-group">
+            <label for="tradeSL">Penaruhan Stop Loss (SL)</label>
+            <input type="number" id="tradeSL" step="any" placeholder="cth: 1.08250" required />
+          </div>
+
+          <div class="form-group">
+            <label for="tradeTP">Target Take Profit (TP)</label>
+            <input type="number" id="tradeTP" step="any" placeholder="cth: 1.09250" required />
+          </div>
+
+          <div class="form-group">
+            <label for="tradeEntryDistance">Jarak Entry Manual <span class="label-hint">(opsional, pips)</span></label>
+            <input type="number" id="tradeEntryDistance" step="0.1" placeholder="Otomatis dari SL" />
+          </div>
+        </div>
+
+        <!-- Live Pip & RR Preview Box -->
+        <div class="calc-preview-bar" id="calcPreviewBar">
+          <div class="calc-item">
+            <span class="calc-label">Jarak Entry → SL</span>
+            <strong class="mono text-coral-dark" id="previewSlPips">0.0 pips</strong>
+          </div>
+          <div class="calc-item">
+            <span class="calc-label">Jarak Entry → TP</span>
+            <strong class="mono text-mint-dark" id="previewTpPips">0.0 pips</strong>
+          </div>
+          <div class="calc-item">
+            <span class="calc-label">Risk : Reward Ratio</span>
+            <strong class="mono" id="previewRR">1 : 0.00</strong>
+          </div>
+          <div class="calc-item">
+            <span class="calc-label">Timeframe / Sesi</span>
+            <div class="inline-mini-inputs">
+              <select id="tradeTimeframe" aria-label="Timeframe">
+                <option value="M5">M5</option>
+                <option value="M15" selected>M15</option>
+                <option value="M30">M30</option>
+                <option value="H1">H1</option>
+                <option value="H4">H4</option>
+                <option value="D1">D1</option>
+              </select>
+              <select id="tradeSession" aria-label="Sesi">
+                <option value="London">London</option>
+                <option value="New York">New York</option>
+                <option value="Asia">Asia</option>
+                <option value="Overlap">Overlap</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section-title">3. Hasil Trade (Profit / Loss) &amp; Snapshot Saldo</div>
+        <div class="form-grid form-grid-4">
+          <div class="form-group">
+            <label for="tradeStatus">Status Hasil</label>
+            <select id="tradeStatus" required>
+              <option value="WIN">Win (Profit)</option>
+              <option value="LOSS">Loss (Rugi)</option>
+              <option value="BE">Breakeven (Impian/0)</option>
+              <option value="OPEN">Open (Sedang Berjalan)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="tradePnl" id="tradePnlLabel">Nominal Profit / Loss ($)</label>
+            <input type="number" id="tradePnl" step="0.01" placeholder="cth: 120.50" required />
+            <small class="field-help" id="pnlHelpText">Masukkan angka positif, sistem otomatis tandai +/- sesuai status.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="tradeExitPrice">Harga Close <span class="label-hint">(opsional)</span></label>
+            <input type="number" id="tradeExitPrice" step="any" placeholder="cth: 1.09250" />
+          </div>
+
+          <div class="form-group">
+            <label for="tradeSetupTag">Kategori Setup</label>
+            <input type="text" id="tradeSetupTag" list="setupSuggestions" placeholder="cth: SMC / Breakout" />
+            <datalist id="setupSuggestions">
+              <option value="Supply & Demand"></option>
+              <option value="SMC / Order Block"></option>
+              <option value="Break & Retest"></option>
+              <option value="Trendline Bounce"></option>
+              <option value="Support & Resistance"></option>
+              <option value="Fibonacci Retracement"></option>
+              <option value="News / Fundamental"></option>
+            </datalist>
+          </div>
+        </div>
+
+        <div class="form-section-title">4. Reason Entry &amp; Evaluasi</div>
+        <div class="form-group">
+          <label for="tradeReason">Reason Entry (Alasan Masuk Posisi)</label>
+          <textarea id="tradeReason" rows="3" placeholder="Jelaskan konfirmasi entry: struktur market, candle confirmation, area SND/OB, kondisi news, dll..." required></textarea>
+        </div>
+
+        <div class="form-grid form-grid-2">
+          <div class="form-group">
+            <label for="tradeNotes">Evaluasi / Catatan Tambahan <span class="label-hint">(opsional)</span></label>
+            <input type="text" id="tradeNotes" placeholder="cth: Disiplin SL, tidak FOMO, geser SL to BE" />
+          </div>
+          <div class="form-group">
+            <label for="tradeChartUrl">Link Screenshot Chart <span class="label-hint">(TradingView, opsional)</span></label>
+            <input type="url" id="tradeChartUrl" placeholder="https://www.tradingview.com/x/..." />
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="tradeModal">Batal</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveTrade">Simpan Catatan Trade</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Pengaturan Akun (Balance, Equity, Mata Uang) -->
+  <div class="modal-backdrop" id="accountModal" hidden role="dialog" aria-modal="true" aria-labelledby="accountModalTitle">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-header">
+        <div>
+          <h2 id="accountModalTitle">Pengaturan Akun Trading</h2>
+          <p class="modal-subtitle">Atur modal awal, penyesuaian saldo, atau sinkronisasi equity.</p>
+        </div>
+        <button type="button" class="btn-icon" data-close-modal="accountModal" aria-label="Tutup">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="accountForm" class="modal-body">
+        <div class="form-group">
+          <label for="accCurrency">Mata Uang Akun</label>
+          <select id="accCurrency">
+            <option value="USD">USD ($)</option>
+            <option value="IDR">IDR (Rp)</option>
+            <option value="EUR">EUR (€)</option>
+            <option value="USC">USC (Cent)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="accInitialBalance">Modal Awal (Initial Balance)</label>
+          <input type="number" id="accInitialBalance" step="0.01" min="0" required />
+          <small class="field-help">Balance Saat Ini dihitung otomatis dari Modal Awal + Total Profit/Loss trade yang sudah ditutup.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="accDepositAdjust">Penyesuaian Deposit / Withdraw (+/-)</label>
+          <input type="number" id="accDepositAdjust" step="0.01" value="0" />
+          <small class="field-help">Isi positif untuk top-up deposit, negatif untuk penarikan (withdraw).</small>
+        </div>
+
+        <div class="form-group">
+          <label for="accManualFloating">Floating P/L Tambahan (di luar catatan) <span class="label-hint">(opsional)</span></label>
+          <input type="number" id="accManualFloating" step="0.01" value="0" />
+          <small class="field-help">Equity Saat Ini = Balance Saat Ini + Floating dari trade Open + penyesuaian ini.</small>
+        </div>
+
+        <div class="account-summary-preview" id="accountPreviewBox">
+          <div><span>Perkiraan Balance:</span> <strong class="mono" id="accPreviewBalance">$0.00</strong></div>
+          <div><span>Perkiraan Equity:</span> <strong class="mono" id="accPreviewEquity">$0.00</strong></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="accountModal">Batal</button>
+          <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Detail Trade -->
+  <div class="modal-backdrop" id="detailModal" hidden role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+    <div class="modal-dialog modal-md">
+      <div class="modal-header">
+        <div>
+          <h2 id="detailModalTitle">Detail Trade</h2>
+          <p class="modal-subtitle" id="detailModalSubtitle"></p>
+        </div>
+        <button type="button" class="btn-icon" data-close-modal="detailModal" aria-label="Tutup">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="detailModalBody">
+        <!-- Populated by JS -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-danger-outline" id="btnDetailDelete">Hapus</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-secondary" data-close-modal="detailModal">Tutup</button>
+        <button type="button" class="btn btn-primary" id="btnDetailEdit">Edit Trade</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Navigation Bar -->
+  <nav class="mobile-bottom-nav" id="mobileBottomNav" aria-label="Menu Navigasi Mobile">
+    <button type="button" class="mbn-item is-active" data-mobile-nav="overview">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="9" rx="1.5" />
+        <rect x="14" y="3" width="7" height="5" rx="1.5" />
+        <rect x="14" y="12" width="7" height="9" rx="1.5" />
+        <rect x="3" y="16" width="7" height="5" rx="1.5" />
+      </svg>
+      <span>Ringkasan</span>
+    </button>
+
+    <button type="button" class="mbn-item" data-mobile-nav="charts">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 3v18h18" />
+        <path d="M7 15l4-4 4 3 5-6" />
+      </svg>
+      <span>Grafik</span>
+    </button>
+
+    <button type="button" class="mbn-add" id="btnMobileNavAdd" aria-label="Catat Trade Baru">
+      <span class="mbn-add-circle">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </span>
+      <span>Catat</span>
+    </button>
+
+    <button type="button" class="mbn-item" data-mobile-nav="journal">
+      <span class="mbn-icon-wrap">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+        <span class="mbn-badge" id="mobileNavJournalBadge" hidden>0</span>
+      </span>
+      <span>Jurnal</span>
+    </button>
+
+    <button type="button" class="mbn-item" data-mobile-nav="account">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-3.8 3.6-6 8-6s8 2.2 8 6" />
+      </svg>
+      <span>Akun</span>
+    </button>
+  </nav>
+
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
