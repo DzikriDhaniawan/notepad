@@ -893,6 +893,8 @@
   }
 
   // ---------- Modals & Forms ----------
+  let confirmResolver = null;
+
   function openModal(id) {
     const el = document.getElementById(id);
     el.hidden = false;
@@ -902,9 +904,55 @@
   function closeModal(id) {
     const el = document.getElementById(id);
     el.hidden = true;
+    if (id === 'confirmModal' && confirmResolver) {
+      const resolve = confirmResolver;
+      confirmResolver = null;
+      resolve(false);
+    }
     if ([...document.querySelectorAll('.modal-backdrop')].every((m) => m.hidden)) {
       document.body.style.overflow = '';
     }
+  }
+
+  function showConfirmDialog({
+    title = 'Apakah Anda yakin?',
+    message = 'Tindakan ini tidak dapat dibatalkan.',
+    note = '',
+    confirmText = 'Ya, Lanjutkan',
+    cancelText = 'Batal',
+    variant = 'coral'
+  }) {
+    if (confirmResolver) {
+      confirmResolver(false);
+      confirmResolver = null;
+    }
+
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+
+    const noteEl = document.getElementById('confirmModalNote');
+    if (note) {
+      noteEl.textContent = note;
+      noteEl.hidden = false;
+    } else {
+      noteEl.hidden = true;
+    }
+
+    const iconEl = document.getElementById('confirmModalIcon');
+    iconEl.className = `confirm-icon ${variant === 'gold' ? 'is-gold' : ''}`;
+
+    const acceptBtn = document.getElementById('btnConfirmAccept');
+    const cancelBtn = document.getElementById('btnConfirmCancel');
+    acceptBtn.textContent = confirmText;
+    cancelBtn.textContent = cancelText;
+    acceptBtn.className = `btn ${variant === 'gold' ? 'btn-secondary' : 'btn-primary'}`;
+
+    openModal('confirmModal');
+    acceptBtn.focus();
+
+    return new Promise((resolve) => {
+      confirmResolver = resolve;
+    });
   }
 
   function updateCalcPreview() {
@@ -1037,10 +1085,17 @@
     openModal('detailModal');
   }
 
-  function deleteTrade(tradeId) {
+  async function deleteTrade(tradeId) {
     const tr = state.trades.find((t) => t.id === tradeId);
     if (!tr) return;
-    if (!confirm(`Hapus catatan trade ${tr.pair.toUpperCase()} (${formatDateShort(tr.date)})?`)) return;
+    const confirmed = await showConfirmDialog({
+      title: 'Hapus Catatan Trade?',
+      message: `Apakah Anda yakin ingin menghapus catatan ${tr.pair.toUpperCase()} (${tr.direction}) tanggal ${formatDateShort(tr.date)}?`,
+      note: 'Saldo Balance, Equity, dan statistik Winrate akan dihitung ulang otomatis.',
+      confirmText: 'Ya, Hapus Trade',
+      variant: 'coral'
+    });
+    if (!confirmed) return;
     state.trades = state.trades.filter((t) => t.id !== tradeId);
     state.isDemo = false;
     saveState();
@@ -1180,8 +1235,15 @@
     reader.readAsText(file);
   }
 
-  function handleResetAll() {
-    if (!confirm('Yakin ingin menghapus seluruh riwayat trading? Tindakan ini tidak bisa dibatalkan.')) return;
+  async function handleResetAll() {
+    const confirmed = await showConfirmDialog({
+      title: 'Hapus Semua Data Jurnal?',
+      message: 'Apakah Anda yakin ingin menghapus seluruh riwayat trading? Tindakan ini tidak bisa dibatalkan.',
+      note: 'Disarankan unduh Backup JSON atau CSV terlebih dahulu sebelum mengosongkan data.',
+      confirmText: 'Ya, Hapus Semua',
+      variant: 'coral'
+    });
+    if (!confirmed) return;
     state.trades = [];
     state.isDemo = false;
     state.account.depositAdjust = 0;
@@ -1193,6 +1255,16 @@
 
   // ---------- Event Wiring ----------
   function initEvents() {
+    document.getElementById('btnConfirmCancel').addEventListener('click', () => {
+      closeModal('confirmModal');
+    });
+    document.getElementById('btnConfirmAccept').addEventListener('click', () => {
+      const resolve = confirmResolver;
+      confirmResolver = null;
+      closeModal('confirmModal');
+      if (resolve) resolve(true);
+    });
+
     document.getElementById('btnNewTrade').addEventListener('click', openNewTradeModal);
     document.getElementById('btnMobileNavAdd').addEventListener('click', openNewTradeModal);
     document.getElementById('btnEmptyAddTrade').addEventListener('click', openNewTradeModal);
@@ -1207,8 +1279,16 @@
       });
     });
 
-    // Clear demo data
-    document.getElementById('btnClearDemo').addEventListener('click', () => {
+    // Clear demo data with custom confirmation popup
+    document.getElementById('btnClearDemo').addEventListener('click', async () => {
+      const confirmed = await showConfirmDialog({
+        title: 'Mulai Jurnal Kosong?',
+        message: 'Apakah Anda yakin ingin menghapus seluruh data contoh dan memulai jurnal trading dari awal?',
+        note: 'Modal awal akun Anda tetap tersimpan dan bisa disesuaikan kapan saja di menu Akun.',
+        confirmText: 'Ya, Mulai Kosong',
+        variant: 'gold'
+      });
+      if (!confirmed) return;
       state.trades = [];
       state.isDemo = false;
       saveState();

@@ -654,6 +654,28 @@
     </div>
   </div>
 
+  <!-- Modal: Konfirmasi Kustom -->
+  <div class="modal-backdrop" id="confirmModal" hidden role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalMessage">
+    <div class="modal-dialog modal-confirm">
+      <div class="confirm-body">
+        <div class="confirm-icon" id="confirmModalIcon" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+        </div>
+        <h2 class="confirm-title" id="confirmModalTitle">Apakah Anda yakin?</h2>
+        <p class="confirm-message" id="confirmModalMessage">Tindakan ini akan mengubah data jurnal Anda.</p>
+        <div class="confirm-note" id="confirmModalNote" hidden></div>
+      </div>
+      <div class="confirm-actions">
+        <button type="button" class="btn btn-ghost" id="btnConfirmCancel">Batal</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmAccept">Ya, Lanjutkan</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile Bottom Navigation Bar -->
   <nav class="mobile-bottom-nav" id="mobileBottomNav" aria-label="Menu Navigasi Mobile">
     <button type="button" class="mbn-item is-active" data-mobile-nav="overview">
